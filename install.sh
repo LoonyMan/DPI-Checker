@@ -1,10 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Set this before publishing:
-# Example:
-# RAW_BASE_URL_DEFAULT="https://raw.githubusercontent.com/yourname/dpi-checker/main"
-RAW_BASE_URL_DEFAULT="${RAW_BASE_URL_DEFAULT:-https://raw.githubusercontent.com/REPLACE_ME/REPLACE_ME/main}"
+# Hardcoded project RAW base URL (no user prompt)
+RAW_BASE_URL_DEFAULT="${RAW_BASE_URL_DEFAULT:-https://raw.githubusercontent.com/LoonyMan/DPI-Checker/master}"
 
 INSTALL_DIR="$(pwd)"
 SCRIPT_NAME="dpi-checker.sh"
@@ -13,28 +11,37 @@ CRON_MARKER="# DPI Checker"
 
 LANG_CODE="en"
 
-say() { printf '%s\n' "$*"; }
-ask() { printf '%s' "$*"; }
+# TTY-safe I/O (works when script is piped to sh)
+TTY_IN="/dev/tty"
+TTY_OUT="/dev/tty"
+[ -r "$TTY_IN" ] || TTY_IN="/dev/stdin"
+[ -w "$TTY_OUT" ] || TTY_OUT="/dev/stderr"
+
+say() { printf '%s\n' "$*" > "$TTY_OUT"; }
+ask() { printf '%s' "$*" > "$TTY_OUT"; }
+
+read_line() {
+  IFS= read -r REPLY < "$TTY_IN" || REPLY=""
+  REPLY="$(printf '%s' "$REPLY" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+}
 
 t() {
   case "$LANG_CODE" in
     ru)
       case "$1" in
         welcome) printf '=== DPI Checker Installer ===' ;;
-        choose_lang) printf 'Выберите язык / Choose language [ru/en] (по умолчанию: ru): ' ;;
+        choose_lang) printf 'Выберите язык [ru/en] (по умолчанию: ru): ' ;;
         lang_set_ru) printf 'Выбран язык: Русский' ;;
-        lang_set_en) printf 'Selected language: English' ;;
+        lang_set_en) printf 'Выбран язык: English' ;;
         install_dir) printf 'Каталог установки' ;;
         download_main) printf 'Скачать основной скрипт dpi-checker.sh из GitHub?' ;;
-        raw_base_prompt) printf 'Base RAW URL GitHub (без /dpi-checker.sh)' ;;
-        raw_base_invalid) printf 'Похоже, URL-заглушка не заменён. Укажи реальный RAW URL GitHub.' ;;
         downloading) printf 'Загрузка' ;;
         download_fail) printf 'Ошибка загрузки файла' ;;
         download_ok) printf 'Файл загружен' ;;
         mode_prompt) printf 'Режим генерации ENV: [1] Упрощённый, [2] Полный (по умолчанию: 1): ' ;;
         mode_simple) printf 'Упрощённый режим' ;;
         mode_full) printf 'Полный режим' ;;
-        tg_token) printf 'TELEGRAM_BOT_TOKEN (пусто = не отправлять в Telegram): ' ;;
+        tg_token) printf 'TELEGRAM_BOT_TOKEN (пусто = отключить Telegram): ' ;;
         tg_chat) printf 'TELEGRAM_CHAT_ID (если токен указан): ' ;;
         tg_lang) printf 'Язык сообщений Telegram [ru/en]' ;;
         notify_success) printf 'Уведомлять об успешных прогонах? [y/N]' ;;
@@ -57,7 +64,6 @@ t() {
         cron_restart_skip) printf 'Не удалось перезапустить cron автоматически' ;;
         done) printf 'Установка завершена' ;;
         next_run) printf 'Ручной запуск' ;;
-        note_shell) printf 'Подсказка: на OpenWRT чаще работает `wget -O - URL | sh`, а не process substitution `<(...)>`.' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -69,8 +75,6 @@ t() {
         lang_set_en) printf 'Language selected: English' ;;
         install_dir) printf 'Install directory' ;;
         download_main) printf 'Download main script dpi-checker.sh from GitHub?' ;;
-        raw_base_prompt) printf 'GitHub RAW base URL (without /dpi-checker.sh)' ;;
-        raw_base_invalid) printf 'Placeholder URL detected. Please enter a real GitHub RAW URL.' ;;
         downloading) printf 'Downloading' ;;
         download_fail) printf 'Failed to download file' ;;
         download_ok) printf 'File downloaded' ;;
@@ -100,7 +104,6 @@ t() {
         cron_restart_skip) printf 'Could not restart cron automatically' ;;
         done) printf 'Installation completed' ;;
         next_run) printf 'Manual run' ;;
-        note_shell) printf 'Tip: on OpenWRT `wget -O - URL | sh` usually works, while `<(...)>` may not.' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -117,7 +120,9 @@ yn_to_01() {
 pick_lang() {
   local ans
   ask "$(t choose_lang)"
-  IFS= read -r ans || ans=""
+  read_line
+  ans="$REPLY"
+
   case "$ans" in
     ru|RU|Ru|rU) LANG_CODE="ru" ;;
     en|EN|En|eN|"") LANG_CODE="en" ;;
@@ -145,19 +150,19 @@ download_file() {
 }
 
 prompt_default() {
-  # $1 prompt, $2 default, outputs chosen value
   local p="$1" d="$2" v
   ask "$p [$d]: "
-  IFS= read -r v || v=""
+  read_line
+  v="$REPLY"
   [ -z "$v" ] && v="$d"
   printf '%s' "$v"
 }
 
 prompt_optional() {
-  local p="$1" v
+  local p="$1"
   ask "$p"
-  IFS= read -r v || v=""
-  printf '%s' "$v"
+  read_line
+  printf '%s' "$REPLY"
 }
 
 ensure_dirs() {
@@ -177,12 +182,12 @@ write_env_simple() {
   tg_lang="$(prompt_default "$(t tg_lang)" "$LANG_CODE")"
 
   ask "$(t notify_success) "
-  IFS= read -r notify_success || notify_success=""
-  notify_success="$(yn_to_01 "$notify_success")"
+  read_line
+  notify_success="$(yn_to_01 "$REPLY")"
 
   ask "$(t all_silent) "
-  IFS= read -r all_silent || all_silent=""
-  all_silent="$(yn_to_01 "$all_silent")"
+  read_line
+  all_silent="$(yn_to_01 "$REPLY")"
 
   retention="$(prompt_default "$(t retention)" "12")"
   log_file="$(prompt_default "$(t log_file)" "$INSTALL_DIR/dpi-checker.log")"
@@ -219,20 +224,20 @@ write_env_full() {
   tg_lang="$(prompt_default "$(t tg_lang)" "$LANG_CODE")"
 
   ask "$(t notify_success) "
-  IFS= read -r notify_success || notify_success=""
-  notify_success="$(yn_to_01 "$notify_success")"
+  read_line
+  notify_success="$(yn_to_01 "$REPLY")"
 
   ask "$(t all_silent) "
-  IFS= read -r all_silent || all_silent=""
-  all_silent="$(yn_to_01 "$all_silent")"
+  read_line
+  all_silent="$(yn_to_01 "$REPLY")"
 
   retention="$(prompt_default "$(t retention)" "12")"
   out_prefix="$(prompt_default "$(t out_prefix)" "dpi_checker_test_")"
   log_file="$(prompt_default "$(t log_file)" "$INSTALL_DIR/dpi-checker.log")"
 
   ask "$(t log_stdout) "
-  IFS= read -r log_stdout || log_stdout=""
-  case "$log_stdout" in
+  read_line
+  case "$REPLY" in
     n|N|no|NO|No|н|Н|нет|Нет|НЕТ) log_stdout="0" ;;
     *) log_stdout="1" ;;
   esac
@@ -274,8 +279,10 @@ shell_quote() {
 setup_cron() {
   local env_path="$1" script_path="$2"
   local ans run_hm hh mm cron_file cron_cmd dir_q env_q script_q tmpf
+
   ask "$(t cron_ask) "
-  IFS= read -r ans || ans=""
+  read_line
+  ans="$REPLY"
   case "$ans" in
     n|N|no|NO|No|н|Н|нет|Нет|НЕТ) return 0 ;;
   esac
@@ -320,35 +327,22 @@ setup_cron() {
 }
 
 main() {
-  local raw_base raw_base_ans url_main mode env_path script_path ans
+  local url_main mode env_path script_path ans
 
   say "$(t welcome)"
   pick_lang
-  say "$(t note_shell)"
   say "$(t install_dir): $INSTALL_DIR"
 
   ensure_dirs
 
   ask "$(t download_main) [Y/n] "
-  IFS= read -r ans || ans=""
+  read_line
+  ans="$REPLY"
   case "$ans" in
     n|N|no|NO|No|н|Н|нет|Нет|НЕТ)
       ;;
     *)
-      raw_base="$RAW_BASE_URL_DEFAULT"
-      if printf '%s' "$raw_base" | grep -q 'REPLACE_ME'; then
-        raw_base=""
-      fi
-
-      raw_base_ans="$(prompt_default "$(t raw_base_prompt)" "${raw_base:-https://raw.githubusercontent.com/yourname/dpi-checker/main}")"
-      raw_base="$raw_base_ans"
-
-      if printf '%s' "$raw_base" | grep -q 'REPLACE_ME'; then
-        say "$(t raw_base_invalid)"
-        exit 1
-      fi
-
-      url_main="${raw_base%/}/$SCRIPT_NAME"
+      url_main="${RAW_BASE_URL_DEFAULT%/}/$SCRIPT_NAME"
       script_path="$INSTALL_DIR/$SCRIPT_NAME"
 
       say "$(t downloading): $url_main"
@@ -368,7 +362,8 @@ main() {
   fi
 
   ask "$(t mode_prompt)"
-  IFS= read -r mode || mode=""
+  read_line
+  mode="$REPLY"
   case "$mode" in
     2) say "$(t mode_full)" ;;
     *) mode="1"; say "$(t mode_simple)" ;;
@@ -388,7 +383,7 @@ main() {
 
   say "$(t done)"
   say "$(t next_run):"
-  printf '  cd %s && . ./%s && ./%s\n' "$INSTALL_DIR" "$ENV_NAME" "$SCRIPT_NAME"
+  printf '  cd %s && . ./%s && ./%s\n' "$INSTALL_DIR" "$ENV_NAME" "$SCRIPT_NAME" > "$TTY_OUT"
 }
 
 main "$@"
