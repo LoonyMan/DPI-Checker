@@ -17,6 +17,14 @@ DPI Checker нужен, чтобы отслеживать, работает ли
 - получение краткого отчёта в Telegram
 - быстрое понимание, что деградировало и какие домены отвалились
 
+
+<img width="326" height="181" alt="изображение" src="https://github.com/user-attachments/assets/dbef2992-d387-4b8e-b276-2b905e7ae913" />
+
+<details>
+  <summary>Логи</summary>
+  <img width="1427" height="1245" alt="изображение" src="https://github.com/user-attachments/assets/1c5ce7ef-0673-43b0-ae16-c42140f1a688" />
+</details>
+
 ---
 
 ## Возможности
