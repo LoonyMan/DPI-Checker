@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-# Hardcoded project RAW base URL (no user prompt)
 RAW_BASE_URL_DEFAULT="${RAW_BASE_URL_DEFAULT:-https://raw.githubusercontent.com/LoonyMan/DPI-Checker/master}"
 
 INSTALL_DIR="$(pwd)"
@@ -11,7 +10,14 @@ CRON_MARKER="# DPI Checker"
 
 LANG_CODE="en"
 
-# TTY-safe I/O (works when script is piped to sh)
+DEFAULT_OUT_PREFIX="dpi_checker_test_"
+DEFAULT_JSON_RETENTION_DAYS="12"
+DEFAULT_LOG_STDOUT="1"
+DEFAULT_TELEGRAM_LIST_MAX_LINES="30"
+DEFAULT_TELEGRAM_MESSAGE_MAX="3900"
+DEFAULT_NETCHECK_URL="https://ya.ru"
+DEFAULT_DPI_SUITE_URL="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.json"
+
 TTY_IN="/dev/tty"
 TTY_OUT="/dev/tty"
 [ -r "$TTY_IN" ] || TTY_IN="/dev/stdin"
@@ -34,7 +40,6 @@ t() {
         lang_set_ru) printf 'Выбран язык: Русский' ;;
         lang_set_en) printf 'Выбран язык: English' ;;
         install_dir) printf 'Каталог установки' ;;
-        download_main) printf 'Скачать основной скрипт dpi-checker.sh из GitHub?' ;;
         downloading) printf 'Загрузка' ;;
         download_fail) printf 'Ошибка загрузки файла' ;;
         download_ok) printf 'Файл загружен' ;;
@@ -47,13 +52,6 @@ t() {
         notify_success) printf 'Уведомлять об успешных прогонах? [y/N]' ;;
         all_silent) printf 'Все Telegram-сообщения тихие (silent)? [y/N]' ;;
         retention) printf 'Хранить JSON (дней)' ;;
-        out_prefix) printf 'Префикс JSON-файлов' ;;
-        log_file) printf 'Файл логов (пусто = отключить лог-файл)' ;;
-        log_stdout) printf 'Выводить логи в консоль? [Y/n]' ;;
-        list_max) printf 'Максимум строк доменов в TG-сообщении' ;;
-        msg_max) printf 'Максимальная длина TG-сообщения' ;;
-        netcheck) printf 'URL для проверки интернета' ;;
-        suite_url) printf 'URL dpi-checkers suite.json' ;;
         env_written) printf 'ENV-файл создан' ;;
         show_env_path) printf 'Путь к ENV' ;;
         cron_ask) printf 'Добавить в автозапуск (cron)? [Y/n]' ;;
@@ -64,6 +62,7 @@ t() {
         cron_restart_skip) printf 'Не удалось перезапустить cron автоматически' ;;
         done) printf 'Установка завершена' ;;
         next_run) printf 'Ручной запуск' ;;
+        auto_download) printf 'Автоматически скачиваю основной скрипт dpi-checker.sh из GitHub...' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -74,7 +73,6 @@ t() {
         lang_set_ru) printf 'Language selected: Russian' ;;
         lang_set_en) printf 'Language selected: English' ;;
         install_dir) printf 'Install directory' ;;
-        download_main) printf 'Download main script dpi-checker.sh from GitHub?' ;;
         downloading) printf 'Downloading' ;;
         download_fail) printf 'Failed to download file' ;;
         download_ok) printf 'File downloaded' ;;
@@ -87,13 +85,6 @@ t() {
         notify_success) printf 'Notify on successful runs? [y/N]' ;;
         all_silent) printf 'Make all Telegram messages silent? [y/N]' ;;
         retention) printf 'Keep JSON files (days)' ;;
-        out_prefix) printf 'JSON filename prefix' ;;
-        log_file) printf 'Log file path (empty = disable file logging)' ;;
-        log_stdout) printf 'Print logs to console? [Y/n]' ;;
-        list_max) printf 'Max domain lines in TG message' ;;
-        msg_max) printf 'Max Telegram message length' ;;
-        netcheck) printf 'Internet check URL' ;;
-        suite_url) printf 'dpi-checkers suite.json URL' ;;
         env_written) printf 'ENV file created' ;;
         show_env_path) printf 'ENV path' ;;
         cron_ask) printf 'Add cron autostart? [Y/n]' ;;
@@ -104,6 +95,7 @@ t() {
         cron_restart_skip) printf 'Could not restart cron automatically' ;;
         done) printf 'Installation completed' ;;
         next_run) printf 'Manual run' ;;
+        auto_download) printf 'Automatically downloading main script dpi-checker.sh from GitHub...' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -169,9 +161,30 @@ ensure_dirs() {
   mkdir -p "$INSTALL_DIR/results" "$INSTALL_DIR/tmp"
 }
 
+download_main_script() {
+  local url_main script_path
+
+  url_main="${RAW_BASE_URL_DEFAULT%/}/$SCRIPT_NAME"
+  script_path="$INSTALL_DIR/$SCRIPT_NAME"
+
+  say "$(t auto_download)"
+  say "$(t downloading): $url_main"
+
+  if ! download_file "$url_main" "$script_path"; then
+    say "$(t download_fail): $url_main"
+    exit 1
+  fi
+
+  chmod +x "$script_path" 2>/dev/null || true
+  say "$(t download_ok): $script_path"
+}
+
 write_env_simple() {
   local env_path="$1"
-  local tg_token tg_chat tg_lang notify_success all_silent retention log_file
+  local tg_token tg_chat tg_lang notify_success all_silent
+  local default_log_file
+
+  default_log_file="$INSTALL_DIR/dpi-checker.log"
 
   tg_token="$(prompt_optional "$(t tg_token)")"
   tg_chat=""
@@ -189,31 +202,37 @@ write_env_simple() {
   read_line
   all_silent="$(yn_to_01 "$REPLY")"
 
-  retention="$(prompt_default "$(t retention)" "12")"
-  log_file="$(prompt_default "$(t log_file)" "$INSTALL_DIR/dpi-checker.log")"
-
   cat > "$env_path" <<EOF
 export TELEGRAM_BOT_TOKEN="$tg_token"
 export TELEGRAM_CHAT_ID="$tg_chat"
 
 export OUT_DIR="$INSTALL_DIR/results"
+export OUT_PREFIX="$DEFAULT_OUT_PREFIX"
 export TMP_BASE_DIR="$INSTALL_DIR/tmp"
 
 export TG_LANG="$tg_lang"
-export JSON_RETENTION_DAYS="$retention"
+export JSON_RETENTION_DAYS="$DEFAULT_JSON_RETENTION_DAYS"
 
 export TG_NOTIFY_SUCCESS="$notify_success"
 export TG_ALL_SILENT="$all_silent"
 
-export LOG_FILE="$log_file"
-export LOG_STDOUT="1"
+export LOG_FILE="$default_log_file"
+export LOG_STDOUT="$DEFAULT_LOG_STDOUT"
+
+export TELEGRAM_LIST_MAX_LINES="$DEFAULT_TELEGRAM_LIST_MAX_LINES"
+export TELEGRAM_MESSAGE_MAX="$DEFAULT_TELEGRAM_MESSAGE_MAX"
+
+export NETCHECK_URL="$DEFAULT_NETCHECK_URL"
+export DPI_SUITE_URL="$DEFAULT_DPI_SUITE_URL"
 EOF
 }
 
 write_env_full() {
   local env_path="$1"
-  local tg_token tg_chat tg_lang notify_success all_silent retention out_prefix log_file log_stdout
-  local list_max msg_max netcheck suite_url
+  local tg_token tg_chat tg_lang notify_success all_silent retention
+  local default_log_file
+
+  default_log_file="$INSTALL_DIR/dpi-checker.log"
 
   tg_token="$(prompt_optional "$(t tg_token)")"
   tg_chat=""
@@ -231,32 +250,18 @@ write_env_full() {
   read_line
   all_silent="$(yn_to_01 "$REPLY")"
 
-  retention="$(prompt_default "$(t retention)" "12")"
-  out_prefix="$(prompt_default "$(t out_prefix)" "dpi_checker_test_")"
-  log_file="$(prompt_default "$(t log_file)" "$INSTALL_DIR/dpi-checker.log")"
-
-  ask "$(t log_stdout) "
-  read_line
-  case "$REPLY" in
-    n|N|no|NO|No|н|Н|нет|Нет|НЕТ) log_stdout="0" ;;
-    *) log_stdout="1" ;;
-  esac
-
-  list_max="$(prompt_default "$(t list_max)" "30")"
-  msg_max="$(prompt_default "$(t msg_max)" "3900")"
-  netcheck="$(prompt_default "$(t netcheck)" "https://ya.ru")"
-  suite_url="$(prompt_default "$(t suite_url)" "https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.json")"
+  retention="$(prompt_default "$(t retention)" "$DEFAULT_JSON_RETENTION_DAYS")"
 
   cat > "$env_path" <<EOF
 export TELEGRAM_BOT_TOKEN="$tg_token"
 export TELEGRAM_CHAT_ID="$tg_chat"
 
 export OUT_DIR="$INSTALL_DIR/results"
-export OUT_PREFIX="$out_prefix"
+export OUT_PREFIX="$DEFAULT_OUT_PREFIX"
 export TMP_BASE_DIR="$INSTALL_DIR/tmp"
 
-export LOG_FILE="$log_file"
-export LOG_STDOUT="$log_stdout"
+export LOG_FILE="$default_log_file"
+export LOG_STDOUT="$DEFAULT_LOG_STDOUT"
 
 export TG_LANG="$tg_lang"
 export JSON_RETENTION_DAYS="$retention"
@@ -264,11 +269,11 @@ export JSON_RETENTION_DAYS="$retention"
 export TG_NOTIFY_SUCCESS="$notify_success"
 export TG_ALL_SILENT="$all_silent"
 
-export TELEGRAM_LIST_MAX_LINES="$list_max"
-export TELEGRAM_MESSAGE_MAX="$msg_max"
+export TELEGRAM_LIST_MAX_LINES="$DEFAULT_TELEGRAM_LIST_MAX_LINES"
+export TELEGRAM_MESSAGE_MAX="$DEFAULT_TELEGRAM_MESSAGE_MAX"
 
-export NETCHECK_URL="$netcheck"
-export DPI_SUITE_URL="$suite_url"
+export NETCHECK_URL="$DEFAULT_NETCHECK_URL"
+export DPI_SUITE_URL="$DEFAULT_DPI_SUITE_URL"
 EOF
 }
 
@@ -327,33 +332,14 @@ setup_cron() {
 }
 
 main() {
-  local url_main mode env_path script_path ans
+  local mode env_path script_path
 
   say "$(t welcome)"
   pick_lang
   say "$(t install_dir): $INSTALL_DIR"
 
   ensure_dirs
-
-  ask "$(t download_main) [Y/n] "
-  read_line
-  ans="$REPLY"
-  case "$ans" in
-    n|N|no|NO|No|н|Н|нет|Нет|НЕТ)
-      ;;
-    *)
-      url_main="${RAW_BASE_URL_DEFAULT%/}/$SCRIPT_NAME"
-      script_path="$INSTALL_DIR/$SCRIPT_NAME"
-
-      say "$(t downloading): $url_main"
-      if ! download_file "$url_main" "$script_path"; then
-        say "$(t download_fail): $url_main"
-        exit 1
-      fi
-      chmod +x "$script_path" 2>/dev/null || true
-      say "$(t download_ok): $script_path"
-      ;;
-  esac
+  download_main_script
 
   script_path="$INSTALL_DIR/$SCRIPT_NAME"
   if [ ! -f "$script_path" ]; then
