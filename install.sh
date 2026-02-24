@@ -63,6 +63,9 @@ t() {
         done) printf 'Установка завершена' ;;
         next_run) printf 'Ручной запуск' ;;
         auto_download) printf 'Автоматически скачиваю основной скрипт dpi-checker.sh из GitHub...' ;;
+        run_first_check) printf 'Запускаю первый тест DPI Checker...' ;;
+        run_first_check_ok) printf 'Первый тест завершён успешно' ;;
+        run_first_check_fail) printf 'Первый тест завершился с ошибкой' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -96,6 +99,9 @@ t() {
         done) printf 'Installation completed' ;;
         next_run) printf 'Manual run' ;;
         auto_download) printf 'Automatically downloading main script dpi-checker.sh from GitHub...' ;;
+        run_first_check) printf 'Running first DPI Checker test...' ;;
+        run_first_check_ok) printf 'First test finished successfully' ;;
+        run_first_check_fail) printf 'First test finished with error' ;;
         *) printf '%s' "$1" ;;
       esac
       ;;
@@ -331,6 +337,35 @@ setup_cron() {
   fi
 }
 
+run_first_test() {
+  local rc=0
+
+  say "$(t run_first_check)"
+
+  if [ ! -f "$INSTALL_DIR/$ENV_NAME" ]; then
+    say "ERROR: ENV file not found: $INSTALL_DIR/$ENV_NAME"
+    return 1
+  fi
+
+  if [ ! -f "$INSTALL_DIR/$SCRIPT_NAME" ]; then
+    say "ERROR: Script file not found: $INSTALL_DIR/$SCRIPT_NAME"
+    return 1
+  fi
+
+  if (
+    cd "$INSTALL_DIR" &&
+    . "./$ENV_NAME" &&
+    "./$SCRIPT_NAME"
+  ); then
+    say "$(t run_first_check_ok)"
+    return 0
+  else
+    rc=$?
+    say "$(t run_first_check_fail) (exit=$rc)"
+    return 0
+  fi
+}
+
 main() {
   local mode env_path script_path
 
@@ -366,6 +401,8 @@ main() {
   say "$(t show_env_path): $env_path"
 
   setup_cron "$env_path" "./$SCRIPT_NAME"
+
+  run_first_test
 
   say "$(t done)"
   say "$(t next_run):"
