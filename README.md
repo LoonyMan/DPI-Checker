@@ -6,6 +6,13 @@ DPI Checker is a lightweight OpenWRT script for **regular (e.g. daily) health ch
 
 It tests target availability, compares results with the previous run, saves JSON reports, and sends a Telegram report with domain-level changes.
 
+<img width="326" height="181" alt="изображение" src="https://github.com/user-attachments/assets/dbef2992-d387-4b8e-b276-2b905e7ae913" />
+
+<details>
+  <summary>Logs</summary>
+  <img width="1427" height="1245" alt="изображение" src="https://github.com/user-attachments/assets/1c5ce7ef-0673-43b0-ae16-c42140f1a688" />
+</details>
+
 ---
 
 ## What this script is for
