@@ -52,7 +52,9 @@ Typical use case:
 ## Installation (Easy mode)
 
 > Run this in the folder where you want the project to be installed.  
-> Examples use `~/DPIChecker` (user home directory). For cron, always use your real absolute path.
+> Examples use `~/DPIChecker` (user home directory).
+
+Connect to your router via SSH and run the commands.
 
 ~~~sh
 mkdir -p ~/DPIChecker && cd ~/DPIChecker
